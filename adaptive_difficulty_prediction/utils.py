@@ -11,7 +11,7 @@ def interval_classification_metrics(targets, preds, B=1024):
     results = {}
     
     # centers = [0.25, 0.5, 0.75, 0.4, 0.6]
-    # closed interval
+    # closed interval 
     interval_mapping = [
         (0.5, 0.125, 0.875),
     ]
