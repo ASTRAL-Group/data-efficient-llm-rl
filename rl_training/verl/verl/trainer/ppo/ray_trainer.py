@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# teacher
+# teacher_replay
 """
 FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
@@ -42,8 +42,6 @@ import time
 from collections import defaultdict
 import random
 
-# from verl.trainer.ppo.teacher_utils import TeacherModel, load_embeddings
-
 WorkerType = Type[Worker]
 
 def dataprotoitem_to_dataproto(item: DataProtoItem) -> DataProto:
@@ -53,6 +51,85 @@ def dataprotoitem_to_dataproto(item: DataProtoItem) -> DataProto:
         non_tensors=item.non_tensor_batch,  # Dict is already in correct format 
         meta_info=item.meta_info
     )
+
+def select_buffer(buffer, teacher_scores, config):
+    
+    import numpy as np
+    import torch
+
+    group_size = 8
+
+    n_raw = len(buffer) // 8
+    print(f"Before deduplication, buffer size: {n_raw}")
+    assert len(buffer) % 8 == 0, "Buffer length must be divisible by 8."
+    indices = buffer.non_tensor_batch['index']
+    for i in range(n_raw):
+        group = indices[i * 8: (i + 1) * 8]
+        assert np.all(group == group[0]), f"Index mismatch at group {i}"
+
+    # deduplication
+    group_ids = indices[::group_size] 
+    last_occurrence = {}
+    for i, gid in enumerate(group_ids):
+        last_occurrence[gid] = i 
+
+    mask = np.zeros_like(indices, dtype=bool)
+    for i in last_occurrence.values():
+        start = i * group_size
+        mask[start:start + group_size] = True
+    mask = mask.tolist()
+    deduped_buffer = dataprotoitem_to_dataproto(buffer[mask])
+
+    buffer = deduped_buffer
+    n_dedup = len(buffer) // 8
+    assert len(buffer) % 8 == 0, "Buffer length must be divisible by 8."
+    
+    # remove all 0 or all 1
+    token_level_scores = buffer.batch['token_level_scores']
+    group_rewards = token_level_scores.sum(dim=-1).reshape(n_dedup, 8)
+    avg_rewards = group_rewards.mean(dim=1)
+    mask_0_1 = ((avg_rewards != 0.0) & (avg_rewards != 1.0)).tolist()
+    mask_0_1 = [val for val in mask_0_1 for _ in range(8)]
+    non_0_1_buffer = dataprotoitem_to_dataproto(buffer[mask_0_1])
+
+    buffer = non_0_1_buffer
+    n = len(buffer) // 8
+    print(f"After deduplication and filtering, buffer size: {n}")
+
+    indices = np.array(buffer.non_tensor_batch['index'],dtype=int)
+    for i in range(n):
+        group = indices[i * 8: (i + 1) * 8]
+        assert np.all(group == group[0]), f"Index mismatch at group {i}"
+    
+    if config.data.replay_strategy == "teacher":
+        raise NotImplementedError
+    elif config.data.replay_strategy == "random":
+        unique_indices = list(range(len(buffer)))[::8]
+        selected_indices = torch.randperm(len(unique_indices))[:int((1-config.data.sigma)*config.data.train_batch_size)]
+        selected_question_indices = [unique_indices[i] for i in selected_indices.tolist()] 
+    
+    selected_mask = [False] * len(indices)
+    for idx in selected_question_indices:
+        start = idx
+        for i in range(start, start + 8):
+            selected_mask[i] = True
+    selected_data = dataprotoitem_to_dataproto(buffer[selected_mask])
+    
+    remaining_budget = config.data.buffer_size - int(config.data.sigma * config.data.train_batch_size)  
+    if n > remaining_budget:
+        if remaining_budget == 0:
+            buffer = None
+            return buffer, selected_data  # Return early if buffer is None
+        else:
+            buffer = dataprotoitem_to_dataproto(buffer[-remaining_budget*8:]) 
+        n = len(buffer) // 8
+        assert len(buffer) % 8 == 0, "Buffer length must be divisible by 8."
+        indices = np.array(buffer.non_tensor_batch['index'],dtype=int)
+        for i in range(n):
+            group = indices[i * 8: (i + 1) * 8]
+            assert np.all(group == group[0]), f"Index mismatch at group {i}"
+        
+    return buffer, selected_data
 
 class Role(Enum):
     """
@@ -680,13 +757,6 @@ class RayPPOTrainer(object):
         self.global_steps = 0
         
         self._load_checkpoint()
-        
-        # load teacher model and embedding dict
-        # self.embeddings_dict = load_embeddings(self.config.teacher_model.embedding_path, self.config.teacher_model.model_name)
-        # self.teacher_model = TeacherModel(self.embedding_dict)
-        # self.teacher_model = TeacherModel.remote(self.embeddings_dict)
-        # resource_pool = self.resource_pool_manager.get_resource_pool(Role.RefPolicy)
-
 
         # perform validation before training
         if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True):
@@ -706,6 +776,17 @@ class RayPPOTrainer(object):
         max_retries = self.config.trainer.get('max_retries', 3)
         retry_count = 0
         retry_delay = self.config.trainer.get('retry_delay', 60)  # seconds
+
+        # Load replay buffer from disk if training breaks
+        if self.global_steps == 1:
+            self.replay_buffer = None
+        else:
+            replay_buffer_dir = os.path.join(self.config.trainer.default_local_dir, 'replay_buffer.pkl')
+            local_latest_buffer_iteration = os.path.join(self.config.trainer.default_local_dir,
+                                                   'latest_buffer_iteration.txt')
+            with open(local_latest_buffer_iteration, 'r') as f:
+                assert self.global_steps == int(f.read().strip()) + 1, "Buffer iteration mismatch"
+            self.replay_buffer = DataProto.load_from_disk(replay_buffer_dir)
         
         while retry_count <= max_retries:
             try:
@@ -729,23 +810,6 @@ class RayPPOTrainer(object):
                                         format_reward=self.config.data.get('format_reward', False)
                                         )
                                 
-                                # curriculum
-                                difficulties = [item['difficulty'] for item in self.train_dataset]
-                                # difficulties = [item['extra_info']['difficulty'] for item in self.train_dataset]
-                                curr_sorted_indices = sorted(range(len(self.train_dataset)), key=lambda i: difficulties[i])
-
-                                num_total = len(self.train_dataset)
-                                one_third = num_total // 3
-
-                                if epoch < self.config.trainer.total_epochs // 3:
-                                    selected_indices_curr = curr_sorted_indices[:one_third]
-                                elif epoch < (2 * self.config.trainer.total_epochs) // 3:
-                                    selected_indices_curr = curr_sorted_indices[one_third:2 * one_third]
-                                else:
-                                    selected_indices_curr = curr_sorted_indices[2 * one_third:]
-
-                                self.train_dataset = torch.utils.data.Subset(self.train_dataset, selected_indices_curr)
-
                                 if not self.config.data.random_selection:
                                     print("Not random!")
                                 
@@ -756,10 +820,10 @@ class RayPPOTrainer(object):
                                     ref_dataloader = DataLoader(dataset=ref_dataset,
                                             batch_size=min(self.config.data.train_batch_size, self.config.data.ref_size),
                                             shuffle=False, 
-                                            drop_last=False, 
+                                            drop_last=False,
                                             collate_fn=collate_fn)
                                     
-                                    # ref data collection, labeling, save
+                                    # Collect reference samples, assign labels, and store them for later use
                                     ref_batches = []
                                     ref_solve_none = 0
                                     ref_solve_all = 0
@@ -817,9 +881,8 @@ class RayPPOTrainer(object):
                                         pickle.dump(ref_data, f)
                                     print(f"[Ref] Saved {len(ref_data)} items to {ref_data_save_path}")
 
-                                    # TODO: load teacher model, get predictions
+                                    # Load teacher model and get predictions
                                     all_questions = [item['extra_info']['question'] for item in self.train_dataset]
-                                    # now you get all_questions (list of texts), ref_indices, ref_questions (list of texts), ref_labels
                                     predicted_labels = self.teacher_wg.predict(all_questions, ref_questions, ref_labels, ref_indices, batch_size=self.config.teacher_model.batch_size)
                                     print("Teacher Prediction Success!")
                                 else:
@@ -832,26 +895,19 @@ class RayPPOTrainer(object):
                                 torch.save(predicted_labels, os.path.join(predicted_label_save_path, f'predicted_labels_epoch_{epoch}.pt'))
                                 print(f"[Predicted Labels] Saved {len(predicted_labels)} labels to {predicted_label_save_path}")
 
-                                # get selected subset
-                                selection_budget = int(self.config.data.mu * self.config.data.train_batch_size)
+                                # Get selected subset
                                 dataset_sampling_scores = -torch.abs(predicted_labels - self.config.data.alpha)
-                                # softmax
                                 dataset_sampling_logits = dataset_sampling_scores / self.config.data.tau
                                 dataset_sampling_logits -= dataset_sampling_logits.max()
                                 dataset_sampling_probabilities = torch.softmax(dataset_sampling_logits, dim=0)
+
+                                # Softmax
+                                if epoch != 0:
+                                    selection_budget = int(self.config.data.mu * self.config.data.train_batch_size * self.config.data.sigma)
+                                else:
+                                    selection_budget = int(self.config.data.mu * self.config.data.train_batch_size)
+
                                 selected_indices = torch.multinomial(dataset_sampling_probabilities, selection_budget, replacement=False)
-
-                                # greedy
-                                # if self.config.data.tau == "greedy":
-                                #     selected_indices = torch.topk(dataset_sampling_scores, selection_budget).indices
-                                # elif self.config.data.tau.startswith("gumbel-"):
-                                #     temp_val = float(self.config.data.tau.split("-")[1])
-                                #     gumbel_noise = -torch.log(-torch.log(torch.rand_like(dataset_sampling_scores)))
-                                #     dataset_sampling_logits = dataset_sampling_scores / temp_val + gumbel_noise
-                                #     selected_indices = torch.topk(dataset_sampling_logits, selection_budget).indices
-                                # else:
-                                #     raise
-
                                 selected_indices = selected_indices[torch.randperm(len(selected_indices))] # shuffle
 
                                 selected_indices_save_path = os.path.join(self.config.trainer.default_local_dir, 'saved_selected_indices')
@@ -861,26 +917,28 @@ class RayPPOTrainer(object):
                                 print(f"[Selected Indices] Saved {len(selected_indices)} indices to {selected_indices_save_path}")
 
                                 use_dataset = torch.utils.data.Subset(self.train_dataset, indices=selected_indices.tolist())  
-                                assert len(use_dataset) % self.config.data.train_batch_size == 0
                                 use_train_dataloader = DataLoader(dataset=use_dataset,
-                                                            batch_size=self.config.data.train_batch_size,
+                                                            batch_size=len(selected_indices) // self.config.data.mu, # replay note
                                                             shuffle=False, 
-                                                            drop_last=False, 
+                                                            drop_last=False,
                                                             collate_fn=collate_fn)
                                 assert len(use_train_dataloader) == self.config.data.mu
 
-                                
                             with _timer('Rollout_update', epoch_raw):
-                                for _, batch_dict in enumerate(tqdm(use_train_dataloader, desc="Rollout_update")):
+                                for batch_step, batch_dict in enumerate(tqdm(use_train_dataloader, desc="Rollout_update")):
                                     batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                                     metrics = {}
                                     
                                     # pop those keys for generation
+                                    start_time = time.time()
                                     gen_batch = batch.pop(batch_keys=['input_ids', 'attention_mask', 'position_ids'])
 
                                     # generate a batch
                                     gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                                    elapsed_time = time.time() - start_time
+                                    metrics['gen_rollout'] = elapsed_time
+                                    print(f"[gen_rollout] Time elapsed: {elapsed_time:.3f} seconds")
 
                                     # This code matches a prompt ID with its N responses.
                                     batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
@@ -918,7 +976,49 @@ class RayPPOTrainer(object):
 
                                     metrics['batch/solve_none'] = solve_none
                                     metrics['batch/solve_all'] = solve_all
-
+                                    
+                                    start_time = time.time()
+                                    old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                                    batch = batch.union(old_log_prob)
+                                    elapsed_time = time.time() - start_time
+                                    metrics['compute_log_prob'] = elapsed_time
+                                    print(f"[compute_log_prob] Time elapsed: {elapsed_time:.3f} seconds")
+                                    
+                                    # Replay
+                                    if epoch == 0:
+                                        if self.replay_buffer is None:
+                                            self.replay_buffer = dataprotoitem_to_dataproto(batch[:])
+                                        else:
+                                            self.replay_buffer, _  = select_buffer(self.replay_buffer, predicted_labels, self.config)
+                                            if self.replay_buffer is None:
+                                                self.replay_buffer = dataprotoitem_to_dataproto(batch[:])
+                                            else:
+                                                self.replay_buffer = DataProto.concat([self.replay_buffer, batch])
+                                    else:
+                                        print("Replaying...")
+                                        
+                                        start_time = time.time()
+                                        self.replay_buffer, replay_batch = select_buffer(self.replay_buffer, predicted_labels, self.config) 
+                                        if self.replay_buffer is None:
+                                            print("Buffer Cleared!")
+                                            self.replay_buffer = dataprotoitem_to_dataproto(batch[:])
+                                        else:
+                                            self.replay_buffer = DataProto.concat([self.replay_buffer, batch])
+                                        elapsed_time = time.time() - start_time
+                                        metrics['select_buffer'] = elapsed_time
+                                        print(f"[select_buffer] Time elapsed: {elapsed_time:.3f} seconds")
+                                        
+                                        self.replay_buffer = DataProto.concat([self.replay_buffer, batch])
+                                        num_overlap_replay = len(np.intersect1d(batch.non_tensor_batch['index'], replay_batch.non_tensor_batch['index']))
+                                        
+                                        metrics['replay_batch/num_overlap'] = num_overlap_replay
+                                        batch = DataProto.concat([batch, replay_batch])
+                                    
+                                    # compute behavior log prob
+                                    if self.config.actor_rollout_ref.actor.use_temp_log_prob:
+                                        temp_log_prob = self.actor_rollout_wg.compute_temp_log_prob(batch)
+                                        batch = batch.union(temp_log_prob) 
+                                    
                                     saved_data = defaultdict(dict)
                                     for _, single_batch in enumerate(batch):
                                         key = single_batch.non_tensor_batch['index']
@@ -936,8 +1036,6 @@ class RayPPOTrainer(object):
                                                     f'rollout_data_step_{self.global_steps}.pkl'), 'wb') as f:
                                         pickle.dump(saved_data, f)
 
-                                    old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                                    batch = batch.union(old_log_prob)
 
                                     if self.use_reference_policy:
                                         # compute reference log_prob
@@ -975,6 +1073,7 @@ class RayPPOTrainer(object):
                                     # compute global_valid tokens
                                     batch.meta_info['global_token_num'] = torch.sum(batch.batch['attention_mask'], dim=-1).tolist()
 
+                                    start_time = time.time()
                                     # update critic
                                     if self.use_critic:
                                         critic_output = self.critic_wg.update_critic(batch)
@@ -987,6 +1086,11 @@ class RayPPOTrainer(object):
                                         actor_output = self.actor_rollout_wg.update_actor(batch)
                                         actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
                                         metrics.update(actor_output_metrics)
+
+                                    elapsed_time = time.time() - start_time
+                                    metrics['actor_update'] = elapsed_time
+                                    print(f"[actor_update] Time elapsed: {elapsed_time:.3f} seconds")
+
 
                                     # validate
                                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
@@ -1005,6 +1109,15 @@ class RayPPOTrainer(object):
                                         print("Saving model...")
                                         with _timer('save_checkpoint', epoch_raw):
                                             self._save_checkpoint(save_checkpoints=True)
+
+                                        replay_buffer_dir = os.path.join(self.config.trainer.default_local_dir, 'replay_buffer.pkl')
+                                        self.replay_buffer.save_to_disk(replay_buffer_dir)
+                                        
+                                        latest_buffer_iteration = os.path.join(self.config.trainer.default_local_dir,
+                                                   'latest_buffer_iteration.txt')
+                                        with open(latest_buffer_iteration, 'w') as f:
+                                            f.write(str(self.global_steps))
+                                        print(f"[Replay] Saved {len(self.replay_buffer)} items to {replay_buffer_dir}")
 
                                     # collect metrics
                                     metrics.update(compute_step_metrics(batch=batch, use_critic=self.use_critic))
@@ -1045,7 +1158,7 @@ class RayPPOTrainer(object):
 
                                     self.global_steps += 1
                                     pbar.update(1)
-                                    
+
                             epoch_metrics.update(compute_epoch_metrics(epoch_raw=epoch_raw))
                             logger.log(data=epoch_metrics, step=self.global_steps-1)
 
