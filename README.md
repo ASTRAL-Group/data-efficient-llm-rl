@@ -3,8 +3,11 @@
 Official Implementation of ["Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay"](https://arxiv.org/abs/2506.05316).
 
 RL fine-tuning for LLMs is notoriously expensive 💸
+
 We're tackling both:
+
 (1) fewer steps to match original GRPO 🚀
+
 (2) lower compute per step ⚡️
 
 ![Framework](figures/main.jpg)
