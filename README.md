@@ -2,17 +2,15 @@
 
 Official Implementation of ["Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay"](https://arxiv.org/abs/2506.05316).
 
-RL fine-tuning for LLMs is notoriously expensive 💸
+RL fine-tuning for LLMs is notoriously expensive 💸. We present two simple yet effective techniques to improve the data efficiency:
 
-We're tackling both:
+(1) fewer steps to match original GRPO 🚀 -> **Difficulty-targeted Online daTa Selection (DOTS)**
 
-(1) fewer steps to match original GRPO 🚀
-
-(2) lower compute per step ⚡️
+(2) lower compute per step ⚡️-> **Rollout Replay (RR)**
 
 ![Framework](figures/main.jpg)
 
-We present two simple yet effective techniques to improve the data efficiency for LLM RL fine-tuning:  **Difficulty-targeted Online daTa Selection (DOTS)** and **Rollout Replay (RR)**. Experiments on six LLM–dataset combinations show that our method reduces RL fine-tuning time by **25%** to **65%** while achieving the same performance as the original GRPO algorithm.
+Experiments on six LLM–dataset combinations show that our method reduces RL fine-tuning time by **25%** to **65%** while achieving the same performance as the original GRPO algorithm.
 
 ![Results](figures/performance.jpg)
 
