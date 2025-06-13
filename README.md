@@ -47,3 +47,11 @@ Part of our codes is based on [rllm](https://github.com/agentica-project/rllm/tr
 # 📚 Citation
 
 If you find our paper helpful, please kindly consider citing our paper in your publication.
+
+```bibtex
+@article{sun2025improving,
+  title={Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay},
+  author={Sun, Yifan and Shen, Jingyan and Wang, Yibin and Chen, Tianyu and Wang, Zhendong and Zhou, Mingyuan and Zhang, Huan},
+  journal={arXiv preprint arXiv:2506.05316},
+  year={2025}
+}
