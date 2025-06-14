@@ -17,7 +17,7 @@ import logging
 import argparse
 import wandb 
 from accelerate import Accelerator
-from utils import pinball_loss, log_main_process, get_tqdm_iterator, interval_classification_metrics, focal_binary_cross_entropy, calibrate_predictions
+from utils import log_main_process, get_tqdm_iterator, interval_classification_metrics, focal_binary_cross_entropy, calibrate_predictions
 from model import FewShotRegressor
 from load_data import (
     QuestionDataset,
@@ -120,10 +120,7 @@ def train_full_epoch(model, train_dataloader, ref_questions, ref_values,
                     preds = model(query_enc, ref_enc, ref_values_tensor, tau=tau)
                 
                 # Calculate loss and backpropagate
-                if loss_type == 'pinball':
-                    loss = criterion(preds, query_values, tau=[0.1,0.5,0.9])
-                else:
-                    loss = criterion(preds, query_values)
+                loss = criterion(preds, query_values)
                 accelerator.backward(loss)
                 
                 optimizer.step()
@@ -621,6 +618,14 @@ if __name__ == "__main__":
         if hasattr(model, 'encoder'):
             for param in model.encoder.encoder.parameters():
                 param.requires_grad = False
+        elif hasattr(model, 'base_model'):
+            for param in model.base_model.parameters():
+                param.requires_grad = False
+        elif hasattr(model, 'transformer'):
+            for param in model.transformer.parameters():
+                param.requires_grad = False
+        else:
+            raise ValueError("Model does not have an encoder or base_model or transformer to freeze")
     
     # Log trainable parameters
     num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
