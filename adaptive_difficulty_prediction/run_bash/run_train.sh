@@ -20,7 +20,6 @@ accelerate launch \
   --ref_size $ref_size \
   --data_path datasets/ \
   --use_embeddings \
-  --freeze_encoder \
   --epochs 20 \
   --seed 1 \
   --lr 1e-3 \
@@ -31,4 +30,4 @@ accelerate launch \
   --output_dir "outputs" \
   --scaling "$scaling" \
   --left_padding \
-  --residual
+  --method residual

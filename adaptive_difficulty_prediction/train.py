@@ -17,13 +17,12 @@ import logging
 import argparse
 import wandb 
 from accelerate import Accelerator
-from utils import log_main_process, get_tqdm_iterator, interval_classification_metrics, focal_binary_cross_entropy, calibrate_predictions
+from utils import log_main_process, get_tqdm_iterator, interval_classification_metrics, calibrate_predictions
 from model import FewShotRegressor
 from load_data import (
     QuestionDataset,
     QuestionEmbeddingDataset,
     TeacherDataset,
-    RECORD_TEST_GROUPS
 )
 from torch.utils.data import DataLoader
 
@@ -195,7 +194,7 @@ def evaluate_test_groups(model, tokenizer, accelerator, logger, save_dir, epoch,
     model.eval()
     test_losses = []
     
-    with open(os.path.join(data_path, f"data_test.pkl"), "rb") as f:
+    with open(os.path.join(data_path, f"data_test_deepmath_8192.pkl"), "rb") as f:
         test_data = pickle.load(f)
     for test_step, test_group_label in enumerate(test_data):
         all_metrics = []
