@@ -1,6 +1,6 @@
 # 🚀 Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay
 
-Official Implementation of ["Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay"](https://arxiv.org/abs/2506.05316).
+Official Implementation of ["Improving Data Efficiency for LLM Reinforcement Fine-tuning Through Difficulty-targeted Online Data Selection and Rollout Replay"(NeurIPS 2025)](https://arxiv.org/abs/2506.05316).
 
 RL fine-tuning for LLMs is notoriously expensive 💸. We present two simple yet effective techniques to improve data efficiency:
 
