@@ -31,11 +31,18 @@ pip install -r requirements.txt
 
 The core of our difficulty-targeted online data selection lies in the attention-based adaptive difficulty prediction framework.  To achieve this efficiently, we freeze a backbone LLM model (e.g., Qwen2.5-Math-1.5B-Instruct) and augment it with a lightweight adapter and a calibration head. The training process can be launched as follows:
 
-```bash
-cd ./adaptive_difficulty_prediction
-bash run_bash/run_embed.sh
-bash run_bash/run_train.sh
-```
+1. Prepare the training data
+
+   In `adaptive_difficulty_prediction/load_data.py`, replace `data_train.pkl` and `data_ref.pkl` with your customized datasets.  
+   You can refer to the example formats provided in the `datasets/` directory.
+
+2. Launch embedding inference and training
+
+   ```bash
+   cd adaptive_difficulty_prediction
+   bash run_bash/run_embed.sh
+   bash run_bash/run_train.sh
+  ```
 
 ## ♻️ Data-efficient RL Training with DOTS and RR
 
