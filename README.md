@@ -52,6 +52,7 @@ To launch RL training with DOTS and RR, run the following example script (Qwen2.
 cd rl_training
 bash run_bash/final_ds_teacher_replay.sh
 ```
+The `adaptive_difficulty_prediction` directory includes the open-sourced adaptive difficulty prediction model and the corresponding embeddings for the Deepscaler datasets.
 
 # 🙏 Acknowledgement
 
