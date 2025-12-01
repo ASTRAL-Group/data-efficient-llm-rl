@@ -34,7 +34,7 @@ The core of our difficulty-targeted online data selection lies in the attention-
 1. Prepare the training data
 
    In `adaptive_difficulty_prediction/load_data.py`, replace `data_train.pkl` and `data_ref.pkl` with your customized datasets.  
-   You can refer to the example formats provided in the `datasets/` directory.
+   You can refer to the example formats provided in the `adaptive_difficulty_prediction/datasets/` directory.
 
 2. Launch embedding inference and training
 
