@@ -42,7 +42,7 @@ The core of our difficulty-targeted online data selection lies in the attention-
    cd adaptive_difficulty_prediction
    bash run_bash/run_embed.sh
    bash run_bash/run_train.sh
-  ```
+   ```  
 
 ## ♻️ Data-efficient RL Training with DOTS and RR
 
