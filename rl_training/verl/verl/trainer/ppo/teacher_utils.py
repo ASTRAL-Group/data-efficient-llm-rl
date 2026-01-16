@@ -196,7 +196,7 @@ class QuestionEmbeddingDataset(Dataset):
         return question, self.embeddings_dict.get(question, None)
 
 def load_embeddings(embedding_path, model_name):
-    questions = pd.read_parquet(os.path.join(embedding_path, 'questions', "questions.parquet"))['problem'].tolist()
+    questions = pd.read_parquet(os.path.join(embedding_path, 'datasets', "questions_deepscaler_10240.parquet"))['problem'].tolist()
     embeddings = torch.load(os.path.join(embedding_path, 'embeddings', f'{model_name.replace("/", "_")}.pt'), map_location=torch.device('cpu'))
     
     if len(questions) != embeddings.shape[0]:

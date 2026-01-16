@@ -23,7 +23,7 @@ EMBEDDING_MODEL="Qwen/Qwen2.5-Math-1.5B-Instruct"
 
 NUM_EPOCHS=30
 LEARNING_RATE=1e-6
-USE_RANDOM_SELECTION=False # note here
+USE_RANDOM_SELECTION=False 
 USE_TEMP_LOG_PROB=True
 
 MU=2
@@ -53,17 +53,13 @@ for DATASET_PATH in "${DATASET_PATHS[@]}"; do
         echo "MAX_COMPLETION_LENGTH=$MAX_COMPLETION_LENGTH"
         PPO_MAX_TOKEN_LEN_PER_GPU=$((8 * 1024 + MAX_COMPLETION_LENGTH))
 
-        if [[ "$MODEL_PATH" == *7B* ]]; then
-            EFFECTIVE_BATCH_SIZE=$((WORLD_SIZE * 32))
-        else
-            EFFECTIVE_BATCH_SIZE=$((WORLD_SIZE * 64)) ### 64!!!
-        fi
+        EFFECTIVE_BATCH_SIZE=$((WORLD_SIZE * 64)) 
 
-        SIGMA=0.25
+        SIGMA=0.5
         BUFFER_SIZE=512
         REPLAY_STRATEGY="random"
 
-        WANDB_NAME="replay_prob_temp_${REPLAY_STRATEGY}_teacher_model_${MODEL_NAME}_dataset_${DATASET_NAME}_epoch_${NUM_EPOCHS}_bs_${EFFECTIVE_BATCH_SIZE}_lr_${LEARNING_RATE}_beta_${BETA}_entropy_${ENTROPY_COEFF}_mu_${MU}_tau_${TAU}_alpha_${ALPHA}_sigma_${SIGMA}_buffer_${BUFFER_SIZE}"
+        WANDB_NAME="replay_${REPLAY_STRATEGY}_teacher_model_${MODEL_NAME}_dataset_${DATASET_NAME}_epoch_${NUM_EPOCHS}_bs_${EFFECTIVE_BATCH_SIZE}_lr_${LEARNING_RATE}_beta_${BETA}_entropy_${ENTROPY_COEFF}_mu_${MU}_tau_${TAU}_alpha_${ALPHA}_sigma_${SIGMA}_buffer_${BUFFER_SIZE}"
         echo "MODEL_PATH=$MODEL_PATH"
         echo "DATASET_PATH=$DATASET_PATH"
 
@@ -122,7 +118,7 @@ for DATASET_PATH in "${DATASET_PATHS[@]}"; do
             +trainer.max_retries=1 \
             +trainer.retry_delay=60 \
             +data.random_selection=$USE_RANDOM_SELECTION \
-            +teacher_model.embedding_path="adaptive_prediction_training" \
+            +teacher_model.embedding_path="adaptive_difficulty_prediction" \
             +teacher_model.model_name="$TEACHER_MODEL_NAME" \
             +teacher_model.batch_size=32 \
             +teacher_model.checkpoint_path=$TEACHER_MODEL_CHECKPOINT_PATH \
