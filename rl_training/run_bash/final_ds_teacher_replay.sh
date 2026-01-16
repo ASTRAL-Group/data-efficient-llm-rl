@@ -39,7 +39,7 @@ for DATASET_PATH in "${DATASET_PATHS[@]}"; do
     for MODEL_PATH in "${MODEL_PATHs[@]}"; do
 
         TEACHER_MODEL_NAME="$EMBEDDING_MODEL"
-        TEACHER_MODEL_CHECKPOINT_PATH="adaptive_prediction_training/adaptive_prediction_model.pt"
+        TEACHER_MODEL_CHECKPOINT_PATH="../../adaptive_difficulty_prediction/adaptive_difficulty_prediction_model.pt"
         TEACHER_MODEL_HIDDEN_SIZE=896
         TEACHER_MODEL_SCALING=group_logit_temp
 
@@ -118,7 +118,7 @@ for DATASET_PATH in "${DATASET_PATHS[@]}"; do
             +trainer.max_retries=1 \
             +trainer.retry_delay=60 \
             +data.random_selection=$USE_RANDOM_SELECTION \
-            +teacher_model.embedding_path="adaptive_difficulty_prediction" \
+            +teacher_model.embedding_path="../../adaptive_difficulty_prediction" \
             +teacher_model.model_name="$TEACHER_MODEL_NAME" \
             +teacher_model.batch_size=32 \
             +teacher_model.checkpoint_path=$TEACHER_MODEL_CHECKPOINT_PATH \
